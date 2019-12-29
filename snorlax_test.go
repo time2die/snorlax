@@ -3,8 +3,6 @@ package snorlax_test
 import (
 	"context"
 	"crypto/tls"
-	"log"
-	"os"
 	"testing"
 	"time"
 
@@ -14,27 +12,19 @@ import (
 
 // docker run -p 5672:5672 rabbitmq:3.8-alpine
 
-const exchange = "testing"
-
-func TestMain(m *testing.M) {
-	if err := snorlax.Init(
-		snorlax.TLS(&tls.Config{}),
-		snorlax.DeclareExchange(exchange),
-	); err != nil {
-		log.Fatalf("error while snorlax wake up: %v", err)
-	}
-
-	st := m.Run()
-
-	if err := snorlax.Close(); err != nil {
-		log.Fatalf("error while snorlax sleep: %v", err)
-	}
-
-	os.Exit(st)
-}
-
 func TestPubSub(t *testing.T) {
-	p, err := snorlax.NewPublisher(
+	const exchange = "testing.pubsub"
+
+	s, err := snorlax.New(
+		snorlax.DeclareExchange(exchange),
+		snorlax.TLS(&tls.Config{}),
+	)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pub, err := s.NewPublisher(
 		snorlax.PublisherExchange(exchange),
 		snorlax.PublisherQueue("queue.testing.pub"),
 		snorlax.PublisherNotDurable(),
@@ -44,7 +34,7 @@ func TestPubSub(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := p.Publish(
+	if err := pub.Publish(
 		context.TODO(),
 		"testing.new", &pb.Event{
 			Body: "test message",
@@ -52,7 +42,7 @@ func TestPubSub(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s, err := snorlax.NewSubscriber(
+	sub, err := s.NewSubscriber(
 		snorlax.SubscriberExchange(exchange),
 		snorlax.SubscriberQueue("queue.testing.sub"),
 		snorlax.SubscriberNotDurable(),
@@ -65,7 +55,7 @@ func TestPubSub(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	if err := s.Subscribe(
+	if err := sub.Subscribe(
 		ctx,
 		"testing.#",
 		handler(t),

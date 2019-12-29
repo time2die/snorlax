@@ -1,8 +1,8 @@
 // Package snorlax provides tools for message query based microservices:
-//     - Configuration through environment;
-//     - Logging through standard log;
-//     - Use only one transport = amqp through RabbitMQ;
-//     - Use only one exchange type for all = topic;
+// - Configuration through environment;
+// - Logging through standard log;
+// - Use only one transport = amqp through RabbitMQ;
+// - Use only one exchange type for all = topic;
 //
 // No registry, service discovery and other smart things.
 // Let k8s do the rest.
@@ -16,34 +16,31 @@ import (
 	"github.com/streadway/amqp"
 )
 
-var conn *amqp.Connection
+// Snorlax is main point for creating pubs and subs.
+type Snorlax struct {
+	conn *amqp.Connection
+}
 
-// Init Snorlax: create connection to RabbitMQ, declare exchanges if any etc.
-func Init(optsf ...Option) error {
-	var err error
-
+// New creates connection to RabbitMQ, declare exchanges if any etc.
+func New(optsf ...Option) (*Snorlax, error) {
 	opts := newOpts()
 
 	for _, o := range optsf {
 		o(&opts)
 	}
 
-	conn, err = amqp.DialTLS(
+	conn, err := amqp.DialTLS(
 		opts.url,
 		opts.tls,
 	)
 
 	if err != nil {
-		return err
-	}
-
-	if len(opts.exchanges) == 0 {
-		return nil
+		return nil, err
 	}
 
 	ch, err := conn.Channel()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	for _, ex := range opts.exchanges {
@@ -56,20 +53,22 @@ func Init(optsf ...Option) error {
 			false, // noWait
 			nil,
 		); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	return ch.Close()
+	if err := ch.Close(); err != nil {
+		return nil, err
+	}
+
+	return &Snorlax{
+		conn: conn,
+	}, nil
 }
 
 // Close amqp connection.
-func Close() error {
-	if conn == nil {
-		return nil
-	}
-
-	return conn.Close()
+func (s *Snorlax) Close() error {
+	return s.conn.Close()
 }
 
 // Publisher publish proto messages.
@@ -79,14 +78,14 @@ type Publisher struct {
 }
 
 // NewPublisher creates channel to RabbitMQ.
-func NewPublisher(optsf ...PublisherOption) (*Publisher, error) {
+func (s *Snorlax) NewPublisher(optsf ...PublisherOption) (*Publisher, error) {
 	opts := newDefPubOpts()
 
 	for _, o := range optsf {
 		o(&opts)
 	}
 
-	ch, err := conn.Channel()
+	ch, err := s.conn.Channel()
 
 	if err != nil {
 		return nil, err
@@ -140,14 +139,14 @@ type Subscriber struct {
 }
 
 // NewSubscriber creates channel to RabbitMQ
-func NewSubscriber(optsf ...SubscriberOption) (*Subscriber, error) {
+func (s *Snorlax) NewSubscriber(optsf ...SubscriberOption) (*Subscriber, error) {
 	opts := newDefSubOpts()
 
 	for _, o := range optsf {
 		o(&opts)
 	}
 
-	ch, err := conn.Channel()
+	ch, err := s.conn.Channel()
 	if err != nil {
 		return nil, err
 	}
