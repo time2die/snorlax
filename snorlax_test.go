@@ -18,7 +18,6 @@ const exchange = "testing"
 
 func TestMain(m *testing.M) {
 	if err := snorlax.Init(
-		snorlax.URL("amqp://guest:guest@0.0.0.0:5672/"),
 		snorlax.TLS(&tls.Config{
 			InsecureSkipVerify: true,
 		}),
