@@ -24,18 +24,23 @@ func newOpts() opts {
 	}
 }
 
+// URL to RabbitMQ. Ex: amqp://guest:guest@0.0.0.0:5672/
+// AMQP_URL will be used if this option not provided.
 func URL(url string) func(*opts) {
 	return func(o *opts) {
 		o.url = url
 	}
 }
 
+// TLS config to RabbitMQ connection.
 func TLS(t *tls.Config) func(*opts) {
 	return func(o *opts) {
 		o.tls = t
 	}
 }
 
+// DeclareExchange on Snorlax initialization.
+// Always topic and always durable.
 func DeclareExchange(name string) func(*opts) {
 	return func(o *opts) {
 		o.exchanges = append(o.exchanges, exchange{
@@ -59,6 +64,7 @@ func newDefPubOpts() pubOpts {
 	}
 }
 
+// PublisherExchange. Defaults to "amq.topic".
 func PublisherExchange(exchange string) func(*pubOpts) {
 	return func(o *pubOpts) {
 		o.exchange = exchange
@@ -93,6 +99,7 @@ func newDefSubOpts() subOpts {
 	}
 }
 
+// SubscriberExchange. Defaults to "amq.topic".
 func SubscriberExchange(exchange string) func(*subOpts) {
 	return func(o *subOpts) {
 		o.exchange = exchange

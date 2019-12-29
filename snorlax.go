@@ -1,3 +1,11 @@
+// Package snorlax provides tools for message query based microservices:
+//     - Configuration through environment;
+//     - Logging through standard log;
+//     - Use only one transport = amqp through RabbitMQ;
+//     - Use only one exchange type for all = topic;
+//
+// No registry, service discovery and other smart things.
+// Let k8s do the rest.
 package snorlax
 
 import (
@@ -10,6 +18,7 @@ import (
 
 var conn *amqp.Connection
 
+// Init Snorlax: create connection to RabbitMQ, declare exchanges if any etc.
 func Init(optsf ...Option) error {
 	var err error
 
@@ -54,6 +63,7 @@ func Init(optsf ...Option) error {
 	return ch.Close()
 }
 
+// Close amqp connection.
 func Close() error {
 	if conn == nil {
 		return nil
@@ -62,11 +72,13 @@ func Close() error {
 	return conn.Close()
 }
 
+// Publisher publish proto messages.
 type Publisher struct {
 	opts pubOpts
 	ch   *amqp.Channel
 }
 
+// NewPublisher creates channel to RabbitMQ.
 func NewPublisher(optsf ...PublisherOption) (*Publisher, error) {
 	opts := newDefPubOpts()
 
@@ -97,6 +109,8 @@ func NewPublisher(optsf ...PublisherOption) (*Publisher, error) {
 	}, nil
 }
 
+// Publish proto message to specific topic. Messages always persistent.
+// Message type will be in header in "MessageType" key.
 func (p *Publisher) Publish(ctx context.Context, topic string, msg proto.Message) error {
 	body, err := proto.Marshal(msg)
 	if err != nil {
@@ -110,7 +124,7 @@ func (p *Publisher) Publish(ctx context.Context, topic string, msg proto.Message
 		false, // immediate
 		amqp.Publishing{
 			Headers: map[string]interface{}{
-				"messageType": proto.MessageName(msg),
+				"MessageType": proto.MessageName(msg),
 			},
 			ContentType:  "application/protobuf",
 			DeliveryMode: amqp.Persistent,
@@ -119,11 +133,13 @@ func (p *Publisher) Publish(ctx context.Context, topic string, msg proto.Message
 	)
 }
 
+// Subscriber subscribes to exchange's topic.
 type Subscriber struct {
 	opts subOpts
 	ch   *amqp.Channel
 }
 
+// NewSubscriber creates channel to RabbitMQ
 func NewSubscriber(optsf ...SubscriberOption) (*Subscriber, error) {
 	opts := newDefSubOpts()
 
@@ -153,9 +169,14 @@ func NewSubscriber(optsf ...SubscriberOption) (*Subscriber, error) {
 	}, nil
 }
 
-type handler func(ctx context.Context, msg interface{}) error
+// Handler handles messages from subscriber. Msg always proto.Message and will be parsed
+// to specific one based on "MessageType" header.
+type Handler func(ctx context.Context, msg interface{}) error
 
-func (s *Subscriber) Subscribe(ctx context.Context, topic string, h handler) error {
+// Subscribe to topic with handler. Blocking function.
+// If message can't be parsed with MessageType header into proto, message will be rejected.
+// On error in handler will be rejected and requeued.
+func (s *Subscriber) Subscribe(ctx context.Context, topic string, h Handler) error {
 	if err := s.ch.QueueBind(
 		s.opts.queue,
 		topic,
@@ -185,7 +206,7 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string, h handler) err
 		case <-ctx.Done():
 			return nil
 		case d := <-chd:
-			t, ok := d.Headers["messageType"]
+			t, ok := d.Headers["MessageType"]
 
 			if !ok {
 				_ = d.Reject(false)
