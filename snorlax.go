@@ -10,10 +10,10 @@ import (
 
 var conn *amqp.Connection
 
-func Init(optsf ...SnorlaxOption) error {
+func Init(optsf ...Option) error {
 	var err error
 
-	opts := newSnrlxOpts()
+	opts := newOpts()
 
 	for _, o := range optsf {
 		o(&opts)
@@ -28,7 +28,7 @@ func Init(optsf ...SnorlaxOption) error {
 		return err
 	}
 
-	if len(opts.exchnages) == 0 {
+	if len(opts.exchanges) == 0 {
 		return nil
 	}
 
@@ -37,7 +37,7 @@ func Init(optsf ...SnorlaxOption) error {
 		return err
 	}
 
-	for _, ex := range opts.exchnages {
+	for _, ex := range opts.exchanges {
 		if err := ch.ExchangeDeclare(
 			ex.name,
 			amqp.ExchangeTopic,
@@ -98,7 +98,6 @@ func NewPublisher(optsf ...PublisherOption) (*Publisher, error) {
 }
 
 func (p *Publisher) Publish(ctx context.Context, topic string, msg proto.Message) error {
-
 	body, err := proto.Marshal(msg)
 	if err != nil {
 		return err
@@ -157,7 +156,6 @@ func NewSubscriber(optsf ...SubscriberOption) (*Subscriber, error) {
 type handler func(ctx context.Context, msg interface{}) error
 
 func (s *Subscriber) Subscribe(ctx context.Context, topic string, h handler) error {
-
 	if err := s.ch.QueueBind(
 		s.opts.queue,
 		topic,
@@ -190,7 +188,7 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string, h handler) err
 			t, ok := d.Headers["messageType"]
 
 			if !ok {
-				d.Reject(false)
+				_ = d.Reject(false)
 
 				continue
 			}
@@ -198,7 +196,7 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string, h handler) err
 			msgt := proto.MessageType(t.(string))
 
 			if msgt == nil {
-				d.Reject(false)
+				_ = d.Reject(false)
 
 				continue
 			}
@@ -210,10 +208,12 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string, h handler) err
 			}
 
 			if err := h(ctx, msg); err != nil {
-				d.Reject(true)
-			} else {
-				d.Ack(false)
+				_ = d.Reject(true)
+
+				continue
 			}
+
+			_ = d.Ack(false)
 		}
 	}
 }

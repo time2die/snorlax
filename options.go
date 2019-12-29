@@ -9,36 +9,36 @@ type exchange struct {
 	name string
 }
 
-type snorlaxOpts struct {
+type opts struct {
 	url       string
-	exchnages []exchange
+	exchanges []exchange
 	tls       *tls.Config
 }
 
-type SnorlaxOption func(*snorlaxOpts)
+type Option func(*opts)
 
-func newSnrlxOpts() snorlaxOpts {
-	return snorlaxOpts{
+func newOpts() opts {
+	return opts{
 		url: os.Getenv("AMQP_URL"),
 		tls: &tls.Config{},
 	}
 }
 
-func URL(url string) func(*snorlaxOpts) {
-	return func(o *snorlaxOpts) {
+func URL(url string) func(*opts) {
+	return func(o *opts) {
 		o.url = url
 	}
 }
 
-func TLS(t *tls.Config) func(*snorlaxOpts) {
-	return func(o *snorlaxOpts) {
+func TLS(t *tls.Config) func(*opts) {
+	return func(o *opts) {
 		o.tls = t
 	}
 }
 
-func DeclareExchange(name string) func(*snorlaxOpts) {
-	return func(o *snorlaxOpts) {
-		o.exchnages = append(o.exchnages, exchange{
+func DeclareExchange(name string) func(*opts) {
+	return func(o *opts) {
+		o.exchanges = append(o.exchanges, exchange{
 			name: name,
 		})
 	}

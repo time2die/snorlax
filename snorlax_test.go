@@ -18,9 +18,7 @@ const exchange = "testing"
 
 func TestMain(m *testing.M) {
 	if err := snorlax.Init(
-		snorlax.TLS(&tls.Config{
-			InsecureSkipVerify: true,
-		}),
+		snorlax.TLS(&tls.Config{}),
 		snorlax.DeclareExchange(exchange),
 	); err != nil {
 		log.Fatalf("error while snorlax wake up: %v", err)
