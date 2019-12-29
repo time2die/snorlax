@@ -111,6 +111,16 @@ func (s *Snorlax) NewPublisher(optsf ...PublisherOption) (*Publisher, error) {
 // Publish proto message to specific topic. Messages always persistent.
 // Message type will be in header in "MessageType" key.
 func (p *Publisher) Publish(ctx context.Context, topic string, msg proto.Message) error {
+	fn := p.publish
+
+	for _, w := range p.opts.wrappers {
+		fn = w(fn)
+	}
+
+	return fn(ctx, topic, msg)
+}
+
+func (p *Publisher) publish(_ context.Context, topic string, msg proto.Message) error {
 	body, err := proto.Marshal(msg)
 	if err != nil {
 		return err
@@ -172,10 +182,39 @@ func (s *Snorlax) NewSubscriber(optsf ...SubscriberOption) (*Subscriber, error) 
 // to specific one based on "MessageType" header.
 type Handler func(ctx context.Context, msg interface{}) error
 
+// SubStatus from Subscriber. Useful for metrics and logging.
+type SubStatus struct {
+	Exchange    string
+	Queue       string
+	Topic       string
+	MessageType string
+	Error       error
+}
+
 // Subscribe to topic with handler. Blocking function.
 // If message can't be parsed with MessageType header into proto, message will be rejected.
 // On error in handler will be rejected and requeued.
-func (s *Subscriber) Subscribe(ctx context.Context, topic string, h Handler) error {
+func (s *Subscriber) Subscribe(ctx context.Context, topic string, h Handler) <-chan SubStatus {
+	fn := s.subscribe
+
+	for _, w := range s.opts.wrappers {
+		fn = w(fn)
+	}
+
+	return fn(ctx, topic, h)
+}
+
+func (s *Subscriber) subscribe(ctx context.Context, topic string, h Handler) <-chan SubStatus {
+	var (
+		statc = make(chan SubStatus)
+
+		stat = SubStatus{
+			Queue:    s.opts.queue,
+			Topic:    topic,
+			Exchange: s.opts.exchange,
+		}
+	)
+
 	if err := s.ch.QueueBind(
 		s.opts.queue,
 		topic,
@@ -183,7 +222,10 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string, h Handler) err
 		false, // noWait,
 		nil,
 	); err != nil {
-		return err
+		stat.Error = err
+		statc <- stat
+
+		return statc
 	}
 
 	chd, err := s.ch.Consume(
@@ -197,17 +239,35 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string, h Handler) err
 	)
 
 	if err != nil {
-		return err
+		stat.Error = err
+		statc <- stat
+
+		return statc
+	}
+
+	go s.subLoop(ctx, h, chd, statc)
+
+	return statc
+}
+
+func (s *Subscriber) subLoop(ctx context.Context, h Handler, chd <-chan amqp.Delivery, statc chan<- SubStatus) {
+	stat := SubStatus{
+		Queue:    s.opts.queue,
+		Exchange: s.opts.exchange,
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			break
 		case d := <-chd:
+			stat.Topic = d.RoutingKey
+
 			t, ok := d.Headers["MessageType"]
 
 			if !ok {
+				statc <- s.statError(stat, ErrSubNoMessageType)
+
 				_ = d.Reject(false)
 
 				continue
@@ -216,6 +276,8 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string, h Handler) err
 			msgt := proto.MessageType(t.(string))
 
 			if msgt == nil {
+				statc <- s.statError(stat, ErrSubUnknownMessageType)
+
 				_ = d.Reject(false)
 
 				continue
@@ -223,17 +285,33 @@ func (s *Subscriber) Subscribe(ctx context.Context, topic string, h Handler) err
 
 			msg := reflect.New(msgt.Elem()).Interface().(proto.Message)
 
+			stat.MessageType = proto.MessageName(msg)
+
 			if err := proto.Unmarshal(d.Body, msg); err != nil {
+				statc <- s.statError(stat, ErrSubUnmarshaling)
+
+				_ = d.Reject(false)
+
 				continue
 			}
 
 			if err := h(ctx, msg); err != nil {
+				statc <- s.statError(stat, ErrSubHandler)
+
 				_ = d.Reject(true)
 
 				continue
 			}
 
+			statc <- stat
+
 			_ = d.Ack(false)
 		}
 	}
+}
+
+func (s *Subscriber) statError(stat SubStatus, err error) SubStatus {
+	stat.Error = err
+
+	return stat
 }

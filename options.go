@@ -1,8 +1,11 @@
 package snorlax
 
 import (
+	"context"
 	"crypto/tls"
 	"os"
+
+	"github.com/golang/protobuf/proto"
 )
 
 type exchange struct {
@@ -49,10 +52,16 @@ func DeclareExchange(name string) func(*opts) {
 	}
 }
 
+type PubFn func(context.Context, string, proto.Message) error
+
+type PubWrapper func(PubFn) PubFn
+
 type pubOpts struct {
 	exchange string
 	queue    string
 	durable  bool
+
+	wrappers []PubWrapper
 }
 
 type PublisherOption func(*pubOpts)
@@ -83,11 +92,23 @@ func PublisherNotDurable() func(*pubOpts) {
 	}
 }
 
+func PublisherWrapper(w PubWrapper) func(*pubOpts) {
+	return func(o *pubOpts) {
+		o.wrappers = append(o.wrappers, w)
+	}
+}
+
+type SubFn func(context.Context, string, Handler) <-chan SubStatus
+
+type SubWrapper func(SubFn) SubFn
+
 type subOpts struct {
 	exchange string
 	queue    string
 	durable  bool
 	autoAck  bool
+
+	wrappers []SubWrapper
 }
 
 type SubscriberOption func(*subOpts)
@@ -121,5 +142,11 @@ func SubscriberQueue(queue string) func(*subOpts) {
 func SubscriberAutoAck() func(*subOpts) {
 	return func(o *subOpts) {
 		o.autoAck = true
+	}
+}
+
+func SubscriberWrapper(w SubWrapper) func(*subOpts) {
+	return func(o *subOpts) {
+		o.wrappers = append(o.wrappers, w)
 	}
 }
