@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"testing"
-	"time"
 
 	"github.com/go-snorlax/snorlax"
 	pb "github.com/go-snorlax/snorlax/testdata"
@@ -30,6 +29,21 @@ func TestPubSub(t *testing.T) {
 
 	assert.NoError(err)
 
+	sub, err := s.NewSubscriber(
+		snorlax.SubscriberExchange(exchange),
+		snorlax.SubscriberQueue("queue.testing.sub"),
+		snorlax.SubscriberNotDurable(),
+		snorlax.SubscriberWrapper(subWrap(t)),
+	)
+
+	assert.NoError(err)
+
+	statc := sub.Subscribe(
+		context.TODO(),
+		"testing.#",
+		handler(t),
+	)
+
 	pub, err := s.NewPublisher(
 		snorlax.PublisherExchange(exchange),
 		snorlax.PublisherQueue("queue.testing.pub"),
@@ -45,30 +59,14 @@ func TestPubSub(t *testing.T) {
 			Body: "test message",
 		}))
 
-	sub, err := s.NewSubscriber(
-		snorlax.SubscriberExchange(exchange),
-		snorlax.SubscriberQueue("queue.testing.sub"),
-		snorlax.SubscriberNotDurable(),
-		snorlax.SubscriberWrapper(subWrap(t)),
-	)
-
-	assert.NoError(err)
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-
-	statc := sub.Subscribe(
-		ctx,
-		"testing.#",
-		handler(t),
-	)
+	stat := <-statc
 
 	assert.Equal(snorlax.SubStatus{
 		Exchange:    "testing.pubsub",
 		Queue:       "queue.testing.sub",
 		Topic:       "testing.new",
 		MessageType: "event.Event",
-	}, <-statc)
+	}, stat)
 }
 
 func handler(t *testing.T) func(ctx context.Context, msg interface{}) error {
