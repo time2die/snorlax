@@ -3,11 +3,13 @@ package snorlax_test
 import (
 	"context"
 	"crypto/tls"
+	"os"
 	"testing"
 
 	"github.com/go-snorlax/snorlax"
 	pb "github.com/go-snorlax/snorlax/testdata"
 	"github.com/golang/protobuf/proto"
+	"github.com/streadway/amqp"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -44,29 +46,69 @@ func TestPubSub(t *testing.T) {
 		handler(t),
 	)
 
-	pub, err := s.NewPublisher(
-		snorlax.PublisherExchange(exchange),
-		snorlax.PublisherQueue("queue.testing.pub"),
-		snorlax.PublisherNotDurable(),
-		snorlax.PublisherWrapper(pubWrap(t)),
-	)
-
-	assert.NoError(err)
-
-	assert.NoError(pub.Publish(
-		context.TODO(),
-		"testing.new", &pb.Event{
-			Body: "test message",
-		}))
-
-	stat := <-statc
-
-	assert.Equal(snorlax.SubStatus{
+	wantStat := snorlax.SubStatus{
 		Exchange:    "testing.pubsub",
 		Queue:       "queue.testing.sub",
 		Topic:       "testing.new",
 		MessageType: "event.Event",
-	}, stat)
+	}
+
+	t.Run("Snorlax publisher", func(t *testing.T) {
+		pub, err := s.NewPublisher(
+			snorlax.PublisherExchange(exchange),
+			snorlax.PublisherQueue("queue.testing.pub"),
+			snorlax.PublisherNotDurable(),
+			snorlax.PublisherWrapper(pubWrap(t)),
+		)
+
+		assert.NoError(err)
+
+		assert.NoError(pub.Publish(
+			context.TODO(),
+			"testing.new", &pb.Event{
+				Body: "test message",
+			}))
+
+		stat := <-statc
+
+		wantStat.ContentType = "application/protobuf"
+
+		assert.Equal(wantStat, stat)
+	})
+
+	t.Run("Json publisher", func(t *testing.T) {
+		conn, err := amqp.Dial(os.Getenv("AMQP_URL"))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ch, err := conn.Channel()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := ch.Publish(
+			exchange,
+			"testing.new",
+			false,
+			false,
+			amqp.Publishing{
+				Headers: map[string]interface{}{
+					"ContentType": "application/json",
+					"MessageType": "event.Event",
+				},
+				Body: []byte(`{"body":"test message"}`),
+			},
+		); err != nil {
+			t.Fatal(err)
+		}
+
+		stat := <-statc
+
+		wantStat.ContentType = "application/json"
+
+		assert.Equal(wantStat, stat)
+	})
 }
 
 func handler(t *testing.T) func(ctx context.Context, msg interface{}) error {

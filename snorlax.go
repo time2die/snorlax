@@ -1,17 +1,19 @@
 // Package snorlax provides tools for message query based microservices:
-// - Configuration through environment;
-// - Logging through standard log;
-// - Use only one transport = amqp through RabbitMQ;
-// - Use only one exchange type for all = topic;
+//     - Configuration through environment;
+//     - Logging through standard log;
+//     - Use only one transport = amqp through RabbitMQ;
+//     - Use only one exchange type for all = topic;
 //
 // No registry, service discovery and other smart things.
 // Let k8s do the rest.
 package snorlax
 
 import (
+	"bytes"
 	"context"
 	"reflect"
 
+	"github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
 	"github.com/streadway/amqp"
 )
@@ -133,6 +135,7 @@ func (p *Publisher) publish(_ context.Context, topic string, msg proto.Message) 
 		false, // immediate
 		amqp.Publishing{
 			Headers: map[string]interface{}{
+				"ContentType": "application/protobuf",
 				"MessageType": proto.MessageName(msg),
 			},
 			ContentType:  "application/protobuf",
@@ -188,6 +191,7 @@ type SubStatus struct {
 	Queue       string
 	Topic       string
 	MessageType string
+	ContentType string
 	Error       error
 }
 
@@ -222,8 +226,7 @@ func (s *Subscriber) subscribe(ctx context.Context, topic string, h Handler) <-c
 		false, // noWait,
 		nil,
 	); err != nil {
-		stat.Error = err
-		statc <- stat
+		statc <- setErrToStat(err, stat)
 
 		return statc
 	}
@@ -262,33 +265,17 @@ func (s *Subscriber) subLoop(ctx context.Context, h Handler, chd <-chan amqp.Del
 			break
 		case d := <-chd:
 			stat.Topic = d.RoutingKey
+			stat.MessageType = iToString(d.Headers["MessageType"])
+			stat.ContentType = iToString(d.Headers["ContentType"])
 
-			t, ok := d.Headers["MessageType"]
+			msg, err := decodeMsgToProto(
+				stat.ContentType,
+				stat.MessageType,
+				d.Body,
+			)
 
-			if !ok {
-				statc <- s.statError(stat, ErrSubNoMessageType)
-
-				_ = d.Reject(false)
-
-				continue
-			}
-
-			msgt := proto.MessageType(t.(string))
-
-			if msgt == nil {
-				statc <- s.statError(stat, ErrSubUnknownMessageType)
-
-				_ = d.Reject(false)
-
-				continue
-			}
-
-			msg := reflect.New(msgt.Elem()).Interface().(proto.Message)
-
-			stat.MessageType = proto.MessageName(msg)
-
-			if err := proto.Unmarshal(d.Body, msg); err != nil {
-				statc <- s.statError(stat, ErrSubUnmarshaling)
+			if err != nil {
+				statc <- setErrToStat(err, stat)
 
 				_ = d.Reject(false)
 
@@ -296,7 +283,7 @@ func (s *Subscriber) subLoop(ctx context.Context, h Handler, chd <-chan amqp.Del
 			}
 
 			if err := h(ctx, msg); err != nil {
-				statc <- s.statError(stat, ErrSubHandler)
+				statc <- setErrToStat(ErrSubHandler, stat)
 
 				_ = d.Reject(true)
 
@@ -310,8 +297,51 @@ func (s *Subscriber) subLoop(ctx context.Context, h Handler, chd <-chan amqp.Del
 	}
 }
 
-func (s *Subscriber) statError(stat SubStatus, err error) SubStatus {
+func decodeMsgToProto(contentType, messageType string, b []byte) (proto.Message, error) {
+	if messageType == "" {
+		return nil, ErrSubNoMessageType
+	}
+
+	typ := proto.MessageType(messageType)
+
+	if typ == nil {
+		return nil, ErrSubUnknownMessageType
+	}
+
+	p := getProtoPtr(typ)
+
+	switch contentType {
+	case "":
+		fallthrough
+	case "application/json":
+		if err := jsonpb.Unmarshal(bytes.NewReader(b), p); err != nil {
+			return nil, ErrSubUnmarshaling
+		}
+	case "application/protobuf":
+		if err := proto.Unmarshal(b, p); err != nil {
+			return nil, ErrSubUnmarshaling
+		}
+	}
+
+	return p, nil
+}
+
+func setErrToStat(err error, stat SubStatus) SubStatus {
 	stat.Error = err
 
 	return stat
+}
+
+func getProtoPtr(t reflect.Type) proto.Message {
+	return reflect.New(t.Elem()).Interface().(proto.Message)
+}
+
+func iToString(i interface{}) string {
+	s, ok := i.(string)
+
+	if !ok {
+		return ""
+	}
+
+	return s
 }
