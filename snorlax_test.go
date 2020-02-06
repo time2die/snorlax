@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-snorlax/snorlax"
 	pb "github.com/go-snorlax/snorlax/testdata"
-	"github.com/golang/protobuf/proto"
+	"github.com/gogo/protobuf/proto"
 	"github.com/streadway/amqp"
 	"github.com/stretchr/testify/assert"
 )

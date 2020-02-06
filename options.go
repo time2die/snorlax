@@ -5,7 +5,7 @@ import (
 	"crypto/tls"
 	"os"
 
-	"github.com/golang/protobuf/proto"
+	"github.com/gogo/protobuf/proto"
 )
 
 type exchange struct {
