@@ -135,7 +135,6 @@ func (p *Publisher) publish(_ context.Context, topic string, msg proto.Message) 
 		false, // immediate
 		amqp.Publishing{
 			Headers: map[string]interface{}{
-				"ContentType": "application/protobuf",
 				"MessageType": proto.MessageName(msg),
 			},
 			ContentType:  "application/protobuf",
@@ -266,7 +265,7 @@ func (s *Subscriber) subLoop(ctx context.Context, h Handler, chd <-chan amqp.Del
 		case d := <-chd:
 			stat.Topic = d.RoutingKey
 			stat.MessageType = iToString(d.Headers["MessageType"])
-			stat.ContentType = iToString(d.Headers["ContentType"])
+			stat.ContentType = iToString(d.ContentType)
 
 			msg, err := decodeMsgToProto(
 				stat.ContentType,

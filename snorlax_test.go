@@ -93,8 +93,8 @@ func TestPubSub(t *testing.T) {
 			false,
 			false,
 			amqp.Publishing{
+				ContentType: "application/json",
 				Headers: map[string]interface{}{
-					"ContentType": "application/json",
 					"MessageType": "event.Event",
 				},
 				Body: []byte(`{"body":"test message"}`),
