@@ -11,6 +11,7 @@ package snorlax
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"reflect"
 
 	"github.com/gogo/protobuf/jsonpb"
@@ -282,7 +283,7 @@ func (s *Subscriber) subLoop(ctx context.Context, h Handler, chd <-chan amqp.Del
 			}
 
 			if err := h(ctx, msg); err != nil {
-				statc <- setErrToStat(ErrSubHandler, stat)
+				statc <- setErrToStat(fmt.Errorf("handler error: %w", err), stat)
 
 				_ = d.Reject(true)
 
