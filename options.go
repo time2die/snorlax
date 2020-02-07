@@ -57,6 +57,7 @@ type PubFn func(context.Context, string, proto.Message) error
 type PubWrapper func(PubFn) PubFn
 
 type pubOpts struct {
+	source   string
 	exchange string
 	queue    string
 	durable  bool
@@ -70,6 +71,12 @@ func newDefPubOpts() pubOpts {
 	return pubOpts{
 		exchange: "amq.topic",
 		durable:  true,
+	}
+}
+
+func PublisherSource(source string) func(*pubOpts) {
+	return func(o *pubOpts) {
+		o.source = source
 	}
 }
 
