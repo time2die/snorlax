@@ -137,6 +137,7 @@ func (p *Publisher) publish(_ context.Context, topic string, msg proto.Message) 
 		amqp.Publishing{
 			Headers: map[string]interface{}{
 				"MessageType": proto.MessageName(msg),
+				"Source":      p.opts.source,
 			},
 			ContentType:  "application/protobuf",
 			DeliveryMode: amqp.Persistent,
@@ -187,6 +188,7 @@ type Handler func(ctx context.Context, msg interface{}) error
 
 // SubStatus from Subscriber. Useful for metrics and logging.
 type SubStatus struct {
+	Source      string
 	Exchange    string
 	Queue       string
 	Topic       string
@@ -267,6 +269,7 @@ func (s *Subscriber) subLoop(ctx context.Context, h Handler, chd <-chan amqp.Del
 			stat.Topic = d.RoutingKey
 			stat.MessageType = iToString(d.Headers["MessageType"])
 			stat.ContentType = iToString(d.ContentType)
+			stat.Source = iToString(d.Headers["Source"])
 
 			msg, err := decodeMsgToProto(
 				stat.ContentType,
