@@ -16,3 +16,10 @@ issues:
         - dupl
         - gosec
         - funlen
+    - path: _test\.go
+      text: "SA5001:"
+      linters:
+        - staticcheck
+    - linters:
+        - gochecknoglobals
+      text: "key"
