@@ -13,7 +13,6 @@ import (
 	"context"
 	"reflect"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/gogo/protobuf/jsonpb"
 	"github.com/gogo/protobuf/proto"
 	"github.com/streadway/amqp"
@@ -239,7 +238,6 @@ func (s *Subscriber) subLoop(ctx context.Context, h Handler, chd <-chan amqp.Del
 		case <-ctx.Done():
 			break
 		case d := <-chd:
-			spew.Dump(d.Headers)
 			ctx = ToContext(ctx, Headers(d.Headers))
 
 			messageType := iToString(d.Headers["MessageType"])
