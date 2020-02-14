@@ -11,9 +11,9 @@ package snorlax
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"reflect"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/gogo/protobuf/jsonpb"
 	"github.com/gogo/protobuf/proto"
 	"github.com/streadway/amqp"
@@ -116,6 +116,13 @@ func (s *Snorlax) NewPublisher(optsf ...PublisherOption) (*Publisher, error) {
 func (p *Publisher) Publish(ctx context.Context, topic string, msg proto.Message) error {
 	fn := p.publish
 
+	ctx = ToContext(ctx, Headers{
+		"Exchange":    p.opts.exchange,
+		"MessageType": proto.MessageName(msg),
+		"Topic":       topic,
+		"Source":      p.opts.source,
+	})
+
 	for _, w := range p.opts.wrappers {
 		fn = w(fn)
 	}
@@ -123,7 +130,7 @@ func (p *Publisher) Publish(ctx context.Context, topic string, msg proto.Message
 	return fn(ctx, topic, msg)
 }
 
-func (p *Publisher) publish(_ context.Context, topic string, msg proto.Message) error {
+func (p *Publisher) publish(ctx context.Context, topic string, msg proto.Message) error {
 	body, err := proto.Marshal(msg)
 	if err != nil {
 		return err
@@ -135,10 +142,7 @@ func (p *Publisher) publish(_ context.Context, topic string, msg proto.Message) 
 		false, // mandatory
 		false, // immediate
 		amqp.Publishing{
-			Headers: map[string]interface{}{
-				"MessageType": proto.MessageName(msg),
-				"Source":      p.opts.source,
-			},
+			Headers:      amqp.Table(FromContext(ctx)),
 			ContentType:  "application/protobuf",
 			DeliveryMode: amqp.Persistent,
 			Body:         body,
@@ -184,43 +188,22 @@ func (s *Snorlax) NewSubscriber(optsf ...SubscriberOption) (*Subscriber, error) 
 
 // Handler handles messages from subscriber. Msg always proto.Message and will be parsed
 // to specific one based on "MessageType" header.
-type Handler func(ctx context.Context, msg interface{}) error
-
-// SubStatus from Subscriber. Useful for metrics and logging.
-type SubStatus struct {
-	Source      string
-	Exchange    string
-	Queue       string
-	Topic       string
-	MessageType string
-	ContentType string
-	Error       error
-}
+type Handler func(ctx context.Context, msg proto.Message) error
 
 // Subscribe to topic with handler. Blocking function.
 // If message can't be parsed with MessageType header into proto, message will be rejected.
 // On error in handler will be rejected and requeued.
-func (s *Subscriber) Subscribe(ctx context.Context, topic string, h Handler) <-chan SubStatus {
+func (s *Subscriber) Subscribe(ctx context.Context, topic string, h Handler) error {
 	fn := s.subscribe
 
 	for _, w := range s.opts.wrappers {
-		fn = w(fn)
+		h = w(h)
 	}
 
 	return fn(ctx, topic, h)
 }
 
-func (s *Subscriber) subscribe(ctx context.Context, topic string, h Handler) <-chan SubStatus {
-	var (
-		statc = make(chan SubStatus)
-
-		stat = SubStatus{
-			Queue:    s.opts.queue,
-			Topic:    topic,
-			Exchange: s.opts.exchange,
-		}
-	)
-
+func (s *Subscriber) subscribe(ctx context.Context, topic string, h Handler) error {
 	if err := s.ch.QueueBind(
 		s.opts.queue,
 		topic,
@@ -228,9 +211,7 @@ func (s *Subscriber) subscribe(ctx context.Context, topic string, h Handler) <-c
 		false, // noWait,
 		nil,
 	); err != nil {
-		statc <- setErrToStat(err, stat)
-
-		return statc
+		return err
 	}
 
 	chd, err := s.ch.Consume(
@@ -244,56 +225,37 @@ func (s *Subscriber) subscribe(ctx context.Context, topic string, h Handler) <-c
 	)
 
 	if err != nil {
-		stat.Error = err
-		statc <- stat
-
-		return statc
+		return err
 	}
 
-	go s.subLoop(ctx, h, chd, statc)
+	go s.subLoop(ctx, h, chd)
 
-	return statc
+	return nil
 }
 
-func (s *Subscriber) subLoop(ctx context.Context, h Handler, chd <-chan amqp.Delivery, statc chan<- SubStatus) {
-	stat := SubStatus{
-		Queue:    s.opts.queue,
-		Exchange: s.opts.exchange,
-	}
-
+func (s *Subscriber) subLoop(ctx context.Context, h Handler, chd <-chan amqp.Delivery) {
 	for {
 		select {
 		case <-ctx.Done():
 			break
 		case d := <-chd:
-			stat.Topic = d.RoutingKey
-			stat.MessageType = iToString(d.Headers["MessageType"])
-			stat.ContentType = iToString(d.ContentType)
-			stat.Source = iToString(d.Headers["Source"])
+			spew.Dump(d.Headers)
+			ctx = ToContext(ctx, Headers(d.Headers))
 
-			msg, err := decodeMsgToProto(
-				stat.ContentType,
-				stat.MessageType,
+			messageType := iToString(d.Headers["MessageType"])
+			contentType := iToString(d.ContentType)
+
+			msg, _ := decodeMsgToProto(
+				contentType,
+				messageType,
 				d.Body,
 			)
 
-			if err != nil {
-				statc <- setErrToStat(err, stat)
-
-				_ = d.Reject(false)
-
-				continue
-			}
-
 			if err := h(ctx, msg); err != nil {
-				statc <- setErrToStat(fmt.Errorf("handler error: %w", err), stat)
-
 				_ = d.Reject(true)
 
 				continue
 			}
-
-			statc <- stat
 
 			_ = d.Ack(false)
 		}
@@ -327,12 +289,6 @@ func decodeMsgToProto(contentType, messageType string, b []byte) (proto.Message,
 	}
 
 	return p, nil
-}
-
-func setErrToStat(err error, stat SubStatus) SubStatus {
-	stat.Error = err
-
-	return stat
 }
 
 func getProtoPtr(t reflect.Type) proto.Message {

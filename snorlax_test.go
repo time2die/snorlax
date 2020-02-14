@@ -3,6 +3,7 @@ package snorlax_test
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"os"
 	"testing"
 
@@ -15,6 +16,14 @@ import (
 
 // docker run -p 5672:5672 rabbitmq:3.8-alpine
 
+func TestMain(m *testing.M) {
+	if os.Getenv("AMQP_URL") == "" {
+		os.Setenv("AMQP_URL", "amqp://guest:guest@0.0.0.0:5672/")
+	}
+
+	os.Exit(m.Run())
+}
+
 func TestPubSub(t *testing.T) {
 	assert := assert.New(t)
 
@@ -25,9 +34,7 @@ func TestPubSub(t *testing.T) {
 		snorlax.TLS(&tls.Config{}),
 	)
 
-	defer func() {
-		_ = s.Close()
-	}()
+	defer s.Close()
 
 	assert.NoError(err)
 
@@ -40,18 +47,11 @@ func TestPubSub(t *testing.T) {
 
 	assert.NoError(err)
 
-	statc := sub.Subscribe(
+	assert.NoError(sub.Subscribe(
 		context.TODO(),
 		"testing.#",
 		handler(t),
-	)
-
-	wantStat := snorlax.SubStatus{
-		Exchange:    "testing.pubsub",
-		Queue:       "queue.testing.sub",
-		Topic:       "testing.new",
-		MessageType: "event.Event",
-	}
+	))
 
 	t.Run("Snorlax publisher", func(t *testing.T) {
 		pub, err := s.NewPublisher(
@@ -59,6 +59,7 @@ func TestPubSub(t *testing.T) {
 			snorlax.PublisherQueue("queue.testing.pub"),
 			snorlax.PublisherNotDurable(),
 			snorlax.PublisherWrapper(pubWrap(t)),
+			snorlax.PublisherSource("source.test"),
 		)
 
 		assert.NoError(err)
@@ -68,12 +69,6 @@ func TestPubSub(t *testing.T) {
 			"testing.new", &pb.Event{
 				Body: "test message",
 			}))
-
-		stat := <-statc
-
-		wantStat.ContentType = "application/protobuf"
-
-		assert.Equal(wantStat, stat)
 	})
 
 	t.Run("Json publisher", func(t *testing.T) {
@@ -95,6 +90,9 @@ func TestPubSub(t *testing.T) {
 			amqp.Publishing{
 				ContentType: "application/json",
 				Headers: map[string]interface{}{
+					"Exchange":    "testing.pubsub",
+					"Topic":       "testing.new",
+					"Source":      "source.test",
 					"MessageType": "event.Event",
 				},
 				Body: []byte(`{"body":"test message"}`),
@@ -102,23 +100,28 @@ func TestPubSub(t *testing.T) {
 		); err != nil {
 			t.Fatal(err)
 		}
-
-		stat := <-statc
-
-		wantStat.ContentType = "application/json"
-
-		assert.Equal(wantStat, stat)
 	})
 }
 
-func handler(t *testing.T) func(ctx context.Context, msg interface{}) error {
-	return func(ctx context.Context, raw interface{}) error {
+func handler(t *testing.T) func(ctx context.Context, msg proto.Message) error {
+	return func(ctx context.Context, raw proto.Message) error {
 		assert := assert.New(t)
 
 		msg, ok := raw.(*pb.Event)
 
 		assert.True(ok)
+		if !assert.NotNil(raw) {
+			return errors.New("empty message")
+		}
+
 		assert.Equal("test message", msg.Body)
+
+		assert.Equal(snorlax.Headers{
+			"Exchange":    "testing.pubsub",
+			"Topic":       "testing.new",
+			"MessageType": "event.Event",
+			"Source":      "source.test",
+		}, snorlax.FromContext(ctx))
 
 		return nil
 	}
@@ -128,6 +131,13 @@ func pubWrap(t *testing.T) snorlax.PubWrapper {
 	return func(fn snorlax.PubFn) snorlax.PubFn {
 		return func(ctx context.Context, topic string, msg proto.Message) error {
 			assert := assert.New(t)
+
+			assert.Equal(snorlax.Headers{
+				"Exchange":    "testing.pubsub",
+				"Topic":       "testing.new",
+				"MessageType": "event.Event",
+				"Source":      "source.test",
+			}, snorlax.FromContext(ctx))
 
 			err := fn(ctx, topic, msg)
 
@@ -139,15 +149,20 @@ func pubWrap(t *testing.T) snorlax.PubWrapper {
 }
 
 func subWrap(t *testing.T) snorlax.SubWrapper {
-	return func(fn snorlax.SubFn) snorlax.SubFn {
-		return func(ctx context.Context, topic string, h snorlax.Handler) <-chan snorlax.SubStatus {
+	return func(fn snorlax.Handler) snorlax.Handler {
+		return func(ctx context.Context, msg proto.Message) error {
 			assert := assert.New(t)
 
-			statc := fn(ctx, topic, h)
+			assert.Equal(snorlax.Headers{
+				"Exchange":    "testing.pubsub",
+				"Topic":       "testing.new",
+				"MessageType": "event.Event",
+				"Source":      "source.test",
+			}, snorlax.FromContext(ctx))
 
-			assert.Equal("testing.#", topic)
+			err := fn(ctx, msg)
 
-			return statc
+			return err
 		}
 	}
 }

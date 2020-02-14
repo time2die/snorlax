@@ -105,9 +105,7 @@ func PublisherWrapper(w PubWrapper) func(*pubOpts) {
 	}
 }
 
-type SubFn func(context.Context, string, Handler) <-chan SubStatus
-
-type SubWrapper func(SubFn) SubFn
+type SubWrapper func(Handler) Handler
 
 type subOpts struct {
 	exchange string
