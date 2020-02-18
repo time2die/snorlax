@@ -193,13 +193,11 @@ type Handler func(ctx context.Context, msg proto.Message) error
 // If message can't be parsed with MessageType header into proto, message will be rejected.
 // On error in handler will be rejected and requeued.
 func (s *Subscriber) Subscribe(ctx context.Context, topic string, h Handler) error {
-	fn := s.subscribe
-
 	for _, w := range s.opts.wrappers {
 		h = w(h)
 	}
 
-	return fn(ctx, topic, h)
+	return s.subscribe(ctx, topic, h)
 }
 
 func (s *Subscriber) subscribe(ctx context.Context, topic string, h Handler) error {
@@ -238,8 +236,6 @@ func (s *Subscriber) subLoop(ctx context.Context, h Handler, chd <-chan amqp.Del
 		case <-ctx.Done():
 			break
 		case d := <-chd:
-			ctx = ToContext(ctx, Headers(d.Headers))
-
 			messageType := iToString(d.Headers["MessageType"])
 			contentType := iToString(d.ContentType)
 
@@ -249,7 +245,9 @@ func (s *Subscriber) subLoop(ctx context.Context, h Handler, chd <-chan amqp.Del
 				d.Body,
 			)
 
-			if err := h(ctx, msg); err != nil {
+			ctxh := ToContext(context.Background(), Headers(d.Headers))
+
+			if err := h(ctxh, msg); err != nil {
 				_ = d.Reject(true)
 
 				continue

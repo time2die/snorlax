@@ -3,7 +3,6 @@ package snorlax_test
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"os"
 	"testing"
 
@@ -42,15 +41,15 @@ func TestPubSub(t *testing.T) {
 		snorlax.SubscriberExchange(exchange),
 		snorlax.SubscriberQueue("queue.testing.sub"),
 		snorlax.SubscriberNotDurable(),
-		snorlax.SubscriberWrapper(subWrap(t)),
+		snorlax.SubscriberWrapper(subWrap()),
 	)
 
 	assert.NoError(err)
 
 	assert.NoError(sub.Subscribe(
-		context.TODO(),
+		context.Background(),
 		"testing.#",
-		handler(t),
+		handler(),
 	))
 
 	t.Run("Snorlax publisher", func(t *testing.T) {
@@ -58,14 +57,14 @@ func TestPubSub(t *testing.T) {
 			snorlax.PublisherExchange(exchange),
 			snorlax.PublisherQueue("queue.testing.pub"),
 			snorlax.PublisherNotDurable(),
-			snorlax.PublisherWrapper(pubWrap(t)),
+			snorlax.PublisherWrapper(pubWrap()),
 			snorlax.PublisherSource("source.test"),
 		)
 
 		assert.NoError(err)
 
 		assert.NoError(pub.Publish(
-			context.TODO(),
+			context.Background(),
 			"testing.new", &pb.Event{
 				Body: "test message",
 			}))
@@ -103,66 +102,24 @@ func TestPubSub(t *testing.T) {
 	})
 }
 
-func handler(t *testing.T) func(ctx context.Context, msg proto.Message) error {
+func handler() func(ctx context.Context, msg proto.Message) error {
 	return func(ctx context.Context, raw proto.Message) error {
-		assert := assert.New(t)
-
-		msg, ok := raw.(*pb.Event)
-
-		assert.True(ok)
-		if !assert.NotNil(raw) {
-			return errors.New("empty message")
-		}
-
-		assert.Equal("test message", msg.Body)
-
-		assert.Equal(snorlax.Headers{
-			"Exchange":    "testing.pubsub",
-			"Topic":       "testing.new",
-			"MessageType": "event.Event",
-			"Source":      "source.test",
-		}, snorlax.FromContext(ctx))
-
 		return nil
 	}
 }
 
-func pubWrap(t *testing.T) snorlax.PubWrapper {
+func pubWrap() snorlax.PubWrapper {
 	return func(fn snorlax.PubFn) snorlax.PubFn {
 		return func(ctx context.Context, topic string, msg proto.Message) error {
-			assert := assert.New(t)
-
-			assert.Equal(snorlax.Headers{
-				"Exchange":    "testing.pubsub",
-				"Topic":       "testing.new",
-				"MessageType": "event.Event",
-				"Source":      "source.test",
-			}, snorlax.FromContext(ctx))
-
-			err := fn(ctx, topic, msg)
-
-			assert.Equal("testing.new", topic)
-
-			return err
+			return nil
 		}
 	}
 }
 
-func subWrap(t *testing.T) snorlax.SubWrapper {
+func subWrap() snorlax.SubWrapper {
 	return func(fn snorlax.Handler) snorlax.Handler {
 		return func(ctx context.Context, msg proto.Message) error {
-			assert := assert.New(t)
-
-			assert.Equal(snorlax.Headers{
-				"Exchange":    "testing.pubsub",
-				"Topic":       "testing.new",
-				"MessageType": "event.Event",
-				"Source":      "source.test",
-			}, snorlax.FromContext(ctx))
-
-			err := fn(ctx, msg)
-
-			return err
+			return nil
 		}
 	}
 }

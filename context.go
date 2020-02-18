@@ -1,6 +1,8 @@
 package snorlax
 
-import "context"
+import (
+	"context"
+)
 
 var key = &struct{}{}
 
