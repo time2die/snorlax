@@ -1,4 +1,4 @@
-module github.com/go-snorlax/snorlax
+module github.com/time2die/snorlax
 
 go 1.13
 
