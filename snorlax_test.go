@@ -6,11 +6,11 @@ import (
 	"os"
 	"testing"
 
-	"github.com/go-snorlax/snorlax"
-	pb "github.com/go-snorlax/snorlax/testdata"
 	"github.com/gogo/protobuf/proto"
 	"github.com/streadway/amqp"
 	"github.com/stretchr/testify/assert"
+	"github.com/time2die/snorlax"
+	pb "github.com/time2die/snorlax/testdata"
 )
 
 // docker run -p 5672:5672 rabbitmq:3.8-alpine
