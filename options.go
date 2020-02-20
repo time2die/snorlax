@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"os"
+	"time"
 
 	"github.com/gogo/protobuf/proto"
 )
@@ -44,7 +45,7 @@ func TLS(t *tls.Config) func(*opts) {
 
 // DeclareExchange on Snorlax initialization.
 // Always topic and always durable.
-func DeclareExchange(name string) func(*opts) {
+func DeclareExchange(name string) Option {
 	return func(o *opts) {
 		o.exchanges = append(o.exchanges, exchange{
 			name: name,
@@ -109,6 +110,7 @@ type subOpts struct {
 	autoAck  bool
 
 	wrappers []SubWrapper
+	duration time.Duration
 }
 
 type SubscriberOption func(*subOpts)
@@ -117,6 +119,7 @@ func newDefSubOpts() subOpts {
 	return subOpts{
 		exchange: "amq.topic",
 		durable:  true,
+		duration: time.Nanosecond,
 	}
 }
 
@@ -142,6 +145,17 @@ func SubscriberQueue(queue string) func(*subOpts) {
 func SubscriberAutoAck() func(*subOpts) {
 	return func(o *subOpts) {
 		o.autoAck = true
+	}
+}
+
+func SubscribeThrottlingInterval(duration string) SubscriberOption {
+	return func(o *subOpts) {
+		dur, err := time.ParseDuration(duration)
+		if err != nil {
+			o.duration = time.Nanosecond
+		} else {
+			o.duration = dur
+		}
 	}
 }
 
