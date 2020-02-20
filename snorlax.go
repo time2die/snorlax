@@ -272,6 +272,8 @@ func (s *Subscriber) throttlingProxy(ctx context.Context,
 			timer.Stop()
 			break
 		case <-timer.C:
+			timer.Reset(duration)
+
 			select {
 			case msg := <-input:
 				output <- msg
