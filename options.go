@@ -153,9 +153,10 @@ func SubscribeThrottlingInterval(duration string) SubscriberOption {
 		dur, err := time.ParseDuration(duration)
 		if err != nil {
 			o.duration = time.Nanosecond
-		} else {
-			o.duration = dur
+			return
 		}
+
+		o.duration = dur
 	}
 }
 
