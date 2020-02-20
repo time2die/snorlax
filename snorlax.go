@@ -13,6 +13,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/gogo/protobuf/jsonpb"
 	"github.com/gogo/protobuf/proto"
@@ -248,9 +249,38 @@ func (s *Subscriber) subscribe(ctx context.Context, topic string, h Handler) <-c
 		return statc
 	}
 
-	go s.subLoop(ctx, h, chd, statc)
+	if s.opts.duration > time.Microsecond {
+		proxyChan := make(chan amqp.Delivery)
+		go s.throttlingProxy(ctx, s.opts.duration, chd, proxyChan)
+		go s.subLoop(ctx, h, proxyChan, statc)
+	} else {
+		go s.subLoop(ctx, h, chd, statc)
+	}
 
 	return statc
+}
+
+func (s *Subscriber) throttlingProxy(ctx context.Context,
+	duration time.Duration,
+	input <-chan amqp.Delivery,
+	output chan amqp.Delivery) {
+	timer := time.NewTimer(duration)
+
+	for {
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			break
+		case <-timer.C:
+			select {
+			case msg := <-input:
+				output <- msg
+
+			default:
+				continue
+			}
+		}
+	}
 }
 
 func (s *Subscriber) subLoop(ctx context.Context, h Handler, chd <-chan amqp.Delivery, statc chan<- SubStatus) {
